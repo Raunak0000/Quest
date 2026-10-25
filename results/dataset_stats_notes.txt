@@ -1,0 +1,41 @@
+
+============================================================
+  LoTTE Dataset Statistics — lifestyle / dev
+============================================================
+
+  Passages :    268,893
+  Queries  :        417
+
+  Passage length (words)
+    Mean   :    172.8
+    Median :    125.0
+    Min    :        1
+    Max    :    5,193
+
+  Relevant passages per query
+    Mean   :     3.30
+    Median :      3.0
+    Min    :        1
+    Max    :       18
+
+  ✓ Saved: /home/raunak/Projects/Quest/results/figures/fig1_passage_lengths.png
+  ✓ Saved: /home/raunak/Projects/Quest/results/figures/fig2_relevant_per_query.png
+
+============================================================
+  Worked example
+============================================================
+
+  Query (qid=327):
+    can i drive my car without a radiator?
+
+  Relevant passage(s) (pids: [251387, 251388, 251406]):
+
+    [pid=251387]
+    An engine is a very large thermal mass. When the engine is cold it takes time to warm up. If you only run the engine for 15 to 30 seconds from cold there should be no problem. Running the engine any longer than that may cause the engine to overheat.
+
+    [pid=251388]
+    It can absolutely be started without a radiator. You will not cause any damage as long as the engine does not overheat. If you don't run it long enough for the engine to get too hot, it's not an issue. To give you an example of how it could be beneficial: I used to own a 94 Camaro Z28. The engine in…
+
+  Irrelevant passage (pid=58369):
+    I did a quick search for "pearlescent acrylic sheet" and it appears there is at least one resource for this type of product. Various contours and colors are available from Acrilex and they all look quite fabulous! I didn't capture all 44 available patterns and there is at least one that resembles th…
+
