@@ -20,7 +20,8 @@ from typing import Literal
 
 # Resolve from this file's location so it works regardless of cwd
 _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DATA_ROOT  = os.path.join(_REPO_ROOT, "lotte")
+_nested_data = os.path.join(_REPO_ROOT, "lotte", "lotte")
+DATA_ROOT  = _nested_data if os.path.exists(_nested_data) else os.path.join(_REPO_ROOT, "lotte")
 
 
 # ---------------------------------------------------------------------------

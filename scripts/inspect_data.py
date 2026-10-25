@@ -16,7 +16,9 @@ import sys
 # Helpers
 # ---------------------------------------------------------------------------
 
-DATA_ROOT = os.path.join(os.path.dirname(__file__), "..", "lotte")
+_base_lotte = os.path.join(os.path.dirname(__file__), "..", "lotte")
+_nested_lotte = os.path.join(_base_lotte, "lotte")
+DATA_ROOT = _nested_lotte if os.path.exists(_nested_lotte) else _base_lotte
 
 
 def human_size(n_bytes: int) -> str:
