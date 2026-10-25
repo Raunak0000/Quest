@@ -1,0 +1,51 @@
+# LoTTE RAG Search Engine
+# Data & indexes (large binary files — git-ignored)
+data/
+indexes/
+lotte/
+
+# Results are committed, so results/ is NOT ignored
+
+# Python artifacts
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Environment secrets
+.env
+
+# Node / frontend
+node_modules/
+frontend/dist/
+frontend/.vite/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Colab-generated embeddings cache
+*.npy
+
+# Large data archives & project docs
+*.tar.gz
+*.pdf
