@@ -138,3 +138,37 @@ def test_bm25_vs_tfidf_overlap_not_identical():
     # Scores are not identical
     assert tfidf_results[0][1] != bm25_results[0][1]
 
+
+def test_dense_ranker_fit_save_load():
+    import numpy as np
+    from backend.rankers import DenseRanker
+
+    # 3 dummy normalized embeddings of dim 4
+    v1 = np.array([1.0, 0.0, 0.0, 0.0], dtype=np.float32)
+    v2 = np.array([0.0, 1.0, 0.0, 0.0], dtype=np.float32)
+    v3 = np.array([0.0, 0.0, 1.0, 0.0], dtype=np.float32)
+    embeddings = np.vstack([v1, v2, v3])
+    pids = [101, 202, 303]
+
+    ranker = DenseRanker()
+    ranker.fit(embeddings, pids=pids)
+
+    assert ranker.index.ntotal == 3
+    assert len(ranker.pids) == 3
+
+    # Test save and load roundtrip
+    with tempfile.TemporaryDirectory() as tmpdir:
+        save_path = os.path.join(tmpdir, "dense.joblib")
+        ranker.save(save_path)
+        assert os.path.exists(save_path)
+
+        loaded_ranker = DenseRanker.load(save_path)
+        assert loaded_ranker.index.ntotal == 3
+        assert list(loaded_ranker.pids) == pids
+
+        # Direct FAISS search on loaded index with vector closest to v2
+        query_vec = np.array([[0.1, 0.9, 0.0, 0.0]], dtype=np.float32)
+        scores, indices = loaded_ranker.index.search(query_vec, 1)
+        assert loaded_ranker.pids[indices[0][0]] == 202
+
+

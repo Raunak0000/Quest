@@ -265,6 +265,148 @@ class Bm25Ranker:
         return ranker
 
 
+class DenseRanker:
+    """Dense semantic retriever using SentenceTransformer and FAISS IndexFlatIP.
+
+    Default model: all-MiniLM-L6-v2 (dim=384).
+    Embeddings are L2-normalized so faiss.IndexFlatIP computes cosine similarity.
+    """
+
+    def __init__(
+        self,
+        model_name: str = "all-MiniLM-L6-v2",
+        device: str | None = None,
+    ) -> None:
+        self.model_name = model_name
+        self.device = device
+        self._model = None
+        self.index: Any = None
+        self.pids: np.ndarray | None = None
+
+    def _get_model(self):
+        """Lazy load SentenceTransformer model."""
+        if self._model is None:
+            from sentence_transformers import SentenceTransformer
+            import torch
+
+            device = self.device or ("cuda" if torch.cuda.is_available() else "cpu")
+            self._model = SentenceTransformer(self.model_name, device=device)
+        return self._model
+
+    def fit(
+        self,
+        embeddings: np.ndarray,
+        pids: Sequence[int] | None = None,
+    ) -> DenseRanker:
+        """Build FAISS IndexFlatIP from pre-computed normalized embeddings.
+
+        Parameters
+        ----------
+        embeddings : np.ndarray
+            Array of shape (N, dim), dtype float32.
+        pids : Sequence[int], optional
+            Passage IDs corresponding to embeddings rows.
+
+        Returns
+        -------
+        self : DenseRanker
+        """
+        import faiss
+
+        emb_array = np.ascontiguousarray(embeddings, dtype=np.float32)
+        dim = emb_array.shape[1]
+
+        if pids is None:
+            pids = list(range(len(emb_array)))
+        self.pids = np.asarray(pids, dtype=np.int64)
+
+        self.index = faiss.IndexFlatIP(dim)
+        self.index.add(emb_array)
+        return self
+
+    @classmethod
+    def from_files(
+        cls,
+        embeddings_path: str | os.PathLike,
+        pids_path: str | os.PathLike,
+        model_name: str = "all-MiniLM-L6-v2",
+        device: str | None = None,
+    ) -> DenseRanker:
+        """Load embeddings.npy and pids.json and build DenseRanker."""
+        import json
+
+        embeddings = np.load(embeddings_path)
+        with open(pids_path, "r", encoding="utf-8") as f:
+            pids = json.load(f)
+
+        ranker = cls(model_name=model_name, device=device)
+        ranker.fit(embeddings, pids=pids)
+        return ranker
+
+    def search(self, query: str, k: int = 10) -> list[tuple[int, float]]:
+        """Retrieve top-k passage IDs and cosine similarity scores for a semantic query.
+
+        Parameters
+        ----------
+        query : str
+            Raw query text (encoded with SentenceTransformer; not stemmed).
+        k : int, default=10
+            Number of top results to return.
+
+        Returns
+        -------
+        list of (pid, score)
+            Top-k passages with scores sorted descending.
+        """
+        if self.index is None or self.pids is None:
+            raise RuntimeError("DenseRanker has not been fitted or loaded. Call fit() or from_files().")
+
+        model = self._get_model()
+        q_emb = model.encode(
+            [query],
+            normalize_embeddings=True,
+            convert_to_numpy=True,
+        ).astype(np.float32)
+
+        k = min(k, len(self.pids))
+        scores, indices = self.index.search(q_emb, k)
+
+        return [(int(self.pids[idx]), float(score)) for idx, score in zip(indices[0], scores[0])]
+
+    def save(self, path: str | os.PathLike) -> None:
+        """Serialize and save the ranker to disk using joblib."""
+        dir_name = os.path.dirname(os.path.abspath(path))
+        if dir_name:
+            os.makedirs(dir_name, exist_ok=True)
+        joblib.dump(self, path)
+
+    @classmethod
+    def load(cls, path: str | os.PathLike) -> DenseRanker:
+        """Load a saved DenseRanker from disk."""
+        ranker = joblib.load(path)
+        if not isinstance(ranker, cls):
+            raise TypeError(f"Loaded object is of type {type(ranker)}, expected {cls.__name__}")
+        return ranker
+
+    def __getstate__(self):
+        import faiss
+
+        state = self.__dict__.copy()
+        if self.index is not None:
+            state["_index_bytes"] = faiss.serialize_index(self.index)
+            state["index"] = None
+        state["_model"] = None
+        return state
+
+    def __setstate__(self, state):
+        import faiss
+
+        index_bytes = state.pop("_index_bytes", None)
+        self.__dict__.update(state)
+        if index_bytes is not None:
+            self.index = faiss.deserialize_index(index_bytes)
+
+
 if __name__ == "__main__":
     import pickle
     import time
