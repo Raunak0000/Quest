@@ -172,3 +172,85 @@ def test_dense_ranker_fit_save_load():
         assert loaded_ranker.pids[indices[0][0]] == 202
 
 
+def test_rrf_fuse_hand_computed():
+    from backend.rrf import rrf_fuse
+
+    # 2-list hand-computed test case
+    # k = 60
+    # List 1: [100, 200, 300]
+    # List 2: [100, 300, 400]
+    list1 = [100, 200, 300]
+    list2 = [100, 300, 400]
+
+    # Hand computation:
+    # 100: rank 1 (L1) + rank 1 (L2) -> 1/(60+1) + 1/(60+1) = 2/61
+    # 300: rank 3 (L1) + rank 2 (L2) -> 1/(60+3) + 1/(60+2) = 1/63 + 1/62 = 125/3906
+    # 200: rank 2 (L1) -> 1/(60+2) = 1/62
+    # 400: rank 3 (L2) -> 1/(60+3) = 1/63
+    expected_100 = 2.0 / 61.0
+    expected_300 = 1.0 / 63.0 + 1.0 / 62.0
+    expected_200 = 1.0 / 62.0
+    expected_400 = 1.0 / 63.0
+
+    results = rrf_fuse([list1, list2], k=60, top_n=4)
+
+    assert len(results) == 4
+    # Check exact order
+    assert [pid for pid, _ in results] == [100, 300, 200, 400]
+
+    # Check exact scores
+    assert results[0] == (100, pytest.approx(expected_100, rel=1e-7))
+    assert results[1] == (300, pytest.approx(expected_300, rel=1e-7))
+    assert results[2] == (200, pytest.approx(expected_200, rel=1e-7))
+    assert results[3] == (400, pytest.approx(expected_400, rel=1e-7))
+
+
+def test_hybrid_ranker():
+    from backend.rankers import HybridRanker
+
+    # Mock components with known search results
+    class DummySparse:
+        def search(self, query, k=100):
+            return [(1, 10.0), (2, 8.0), (3, 6.0)]
+
+    class DummyDense:
+        def search(self, query, k=100):
+            return [(2, 0.9), (1, 0.7), (4, 0.5)]
+
+    class DummyTfidf:
+        def search(self, query, k=100):
+            return [(3, 0.8), (2, 0.5), (5, 0.3)]
+
+    # 1. 2-way Hybrid (Sparse BM25 + Dense)
+    hybrid_2way = HybridRanker(
+        sparse=DummySparse(),
+        dense=DummyDense(),
+        use_tfidf=False,
+        rrf_k=60,
+    )
+    res_2way = hybrid_2way.search("test query", k=3)
+    pids_2way = [pid for pid, _ in res_2way]
+    # In 2-way:
+    # PID 1: rank 1 (sparse) + rank 2 (dense) -> 1/61 + 1/62 = 0.032522
+    # PID 2: rank 2 (sparse) + rank 1 (dense) -> 1/62 + 1/61 = 0.032522
+    # Both 1 and 2 are top ranked
+    assert set(pids_2way[:2]) == {1, 2}
+
+    # 2. 3-way Hybrid ablation (Sparse BM25 + Dense + TF-IDF)
+    hybrid_3way = HybridRanker(
+        sparse=DummySparse(),
+        dense=DummyDense(),
+        tfidf=DummyTfidf(),
+        use_tfidf=True,
+        rrf_k=60,
+    )
+    res_3way = hybrid_3way.search("test query", k=3)
+    pids_3way = [pid for pid, _ in res_3way]
+    # With TF-IDF included:
+    # PID 2 gets bonus from rank 2 in TF-IDF -> 1/62 + 1/61 + 1/62 = 0.04865
+    # PID 1 gets nothing from TF-IDF -> 0.032522
+    # PID 2 MUST be #1 unambiguously!
+    assert pids_3way[0] == 2
+
+
+

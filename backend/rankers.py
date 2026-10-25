@@ -407,6 +407,92 @@ class DenseRanker:
             self.index = faiss.deserialize_index(index_bytes)
 
 
+class HybridRanker:
+    """Hybrid ranker combining sparse and dense retrievers via Reciprocal Rank Fusion (RRF).
+
+    Combines:
+      - Sparse baseline (default: Bm25Ranker)
+      - Dense semantic retriever (default: DenseRanker)
+      - Optional 3-way ablation baseline (TfidfRanker if use_tfidf=True)
+    """
+
+    def __init__(
+        self,
+        sparse: Bm25Ranker | None = None,
+        dense: DenseRanker | None = None,
+        tfidf: TfidfRanker | None = None,
+        use_tfidf: bool = False,
+        rrf_k: int = 60,
+        component_top_k: int = 100,
+    ) -> None:
+        self.sparse = sparse
+        self.dense = dense
+        self.tfidf = tfidf
+        self.use_tfidf = use_tfidf
+        self.rrf_k = rrf_k
+        self.component_top_k = component_top_k
+
+    def search(self, query: str, k: int = 10) -> list[tuple[int, float]]:
+        """Retrieve top-k passages by fusing sparse and dense ranked lists via RRF.
+
+        Parameters
+        ----------
+        query : str
+            Raw text query string.
+        k : int, default=10
+            Number of top results to return.
+
+        Returns
+        -------
+        list of (pid, score)
+            Fused top-k passages sorted descending by RRF score.
+        """
+        from backend.rrf import rrf_fuse
+
+        rank_lists: list[list[int]] = []
+
+        # 1. Sparse retrieval (BM25)
+        if self.sparse is not None:
+            sparse_results = self.sparse.search(query, k=self.component_top_k)
+            sparse_pids = [pid for pid, _ in sparse_results]
+            if sparse_pids:
+                rank_lists.append(sparse_pids)
+
+        # 2. Dense retrieval (SentenceTransformer + FAISS)
+        if self.dense is not None:
+            dense_results = self.dense.search(query, k=self.component_top_k)
+            dense_pids = [pid for pid, _ in dense_results]
+            if dense_pids:
+                rank_lists.append(dense_pids)
+
+        # 3. Optional 3-way ablation (TF-IDF)
+        if self.use_tfidf and self.tfidf is not None:
+            tfidf_results = self.tfidf.search(query, k=self.component_top_k)
+            tfidf_pids = [pid for pid, _ in tfidf_results]
+            if tfidf_pids:
+                rank_lists.append(tfidf_pids)
+
+        if not rank_lists:
+            return []
+
+        return rrf_fuse(rank_lists, k=self.rrf_k, top_n=k)
+
+    def save(self, path: str | os.PathLike) -> None:
+        """Serialize HybridRanker to disk using joblib."""
+        dir_name = os.path.dirname(os.path.abspath(path))
+        if dir_name:
+            os.makedirs(dir_name, exist_ok=True)
+        joblib.dump(self, path)
+
+    @classmethod
+    def load(cls, path: str | os.PathLike) -> HybridRanker:
+        """Load a saved HybridRanker from disk."""
+        ranker = joblib.load(path)
+        if not isinstance(ranker, cls):
+            raise TypeError(f"Loaded object is of type {type(ranker)}, expected {cls.__name__}")
+        return ranker
+
+
 if __name__ == "__main__":
     import pickle
     import time
