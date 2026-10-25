@@ -150,6 +150,121 @@ class TfidfRanker:
         return ranker
 
 
+class Bm25Ranker:
+    """BM25 probabilistic ranker using the bm25s library.
+
+    Computes BM25 scores over pre-tokenized documents with parameters k1=1.5, b=0.75.
+    Preserves original passage ID (PID) order and mapping.
+    """
+
+    def __init__(self, k1: float = 1.5, b: float = 0.75) -> None:
+        self.k1 = k1
+        self.b = b
+        self.retriever: Any = None
+        self.pids: np.ndarray | None = None
+
+    def fit(
+        self,
+        corpus_tokens: Sequence[Sequence[str]] | dict[int, list[str]],
+        pids: Sequence[int] | None = None,
+    ) -> Bm25Ranker:
+        """Fit BM25 index on pre-tokenized documents.
+
+        Parameters
+        ----------
+        corpus_tokens : Sequence[Sequence[str]] or dict[int, list[str]]
+            Pre-tokenized documents.
+        pids : Sequence[int], optional
+            Passage IDs corresponding to corpus_tokens.
+
+        Returns
+        -------
+        self : Bm25Ranker
+        """
+        import bm25s
+        import scipy.sparse as sp
+
+        # Memory-efficient CSC construction using scipy to prevent MemoryError on Windows
+        def _scipy_csc(data, rows, cols, shape):
+            csc = sp.csc_matrix((data, (rows, cols)), shape=shape)
+            return csc.data, csc.indices, csc.indptr
+
+        bm25s.BM25._np_csc = staticmethod(_scipy_csc)
+
+        if isinstance(corpus_tokens, dict):
+            if pids is None:
+                pids = list(corpus_tokens.keys())
+            token_docs = [corpus_tokens[pid] for pid in pids]
+        else:
+            token_docs = list(corpus_tokens)
+            if pids is None:
+                pids = list(range(len(corpus_tokens)))
+
+        self.pids = np.asarray(pids, dtype=np.int64)
+        self.retriever = bm25s.BM25(k1=self.k1, b=self.b)
+        self.retriever.index(token_docs)
+        return self
+
+    def search(self, query: str, k: int = 10) -> list[tuple[int, float]]:
+        """Retrieve top-k passage IDs and BM25 scores for a query.
+
+        Parameters
+        ----------
+        query : str
+            Raw text query string (preprocessed via backend.preprocess.preprocess).
+        k : int, default=10
+            Number of top results to return.
+
+        Returns
+        -------
+        list of (pid, score)
+            Top-k passages with scores sorted descending.
+        """
+        if self.retriever is None or self.pids is None:
+            raise RuntimeError("Bm25Ranker has not been fitted. Call fit() or load() first.")
+
+        query_tokens = preprocess(query)
+        if not query_tokens:
+            return []
+
+        k = min(k, len(self.pids))
+        docs, scores = self.retriever.retrieve([query_tokens], k=k)
+
+        return [(int(self.pids[doc_idx]), float(score)) for doc_idx, score in zip(docs[0], scores[0])]
+
+    def save(self, path: str | os.PathLike) -> None:
+        """Serialize and save the ranker to disk using joblib or directory."""
+        path_str = str(path)
+        if os.path.isdir(path_str):
+            self.retriever.save(path_str)
+            if self.pids is not None:
+                joblib.dump(self.pids, os.path.join(path_str, "pids.joblib"))
+        else:
+            dir_name = os.path.dirname(os.path.abspath(path_str))
+            if dir_name:
+                os.makedirs(dir_name, exist_ok=True)
+            joblib.dump(self, path_str)
+
+    @classmethod
+    def load(cls, path: str | os.PathLike) -> Bm25Ranker:
+        """Load a saved Bm25Ranker from disk."""
+        path_str = str(path)
+        if os.path.isdir(path_str) and os.path.exists(os.path.join(path_str, "params.json")):
+            import bm25s
+            retriever = bm25s.BM25.load(path_str)
+            ranker = cls(k1=retriever.k1, b=retriever.b)
+            ranker.retriever = retriever
+            pids_file = os.path.join(path_str, "pids.joblib")
+            if os.path.exists(pids_file):
+                ranker.pids = joblib.load(pids_file)
+            return ranker
+
+        ranker = joblib.load(path_str)
+        if not isinstance(ranker, cls):
+            raise TypeError(f"Loaded object is of type {type(ranker)}, expected {cls.__name__}")
+        return ranker
+
+
 if __name__ == "__main__":
     import pickle
     import time
