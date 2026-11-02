@@ -123,7 +123,7 @@ def run(domain: str = "lifestyle", split: str = "dev") -> None:
     out1 = os.path.join(FIGURES_DIR, "fig1_passage_lengths.png")
     fig1.savefig(out1, dpi=DPI)
     plt.close(fig1)
-    print(f"\n  ✓ Saved: {out1}")
+    print(f"\n  [OK] Saved: {out1}")
 
     # ================================================================== #
     # Figure 2 — Histogram of relevant passages per query
@@ -148,7 +148,7 @@ def run(domain: str = "lifestyle", split: str = "dev") -> None:
     out2 = os.path.join(FIGURES_DIR, "fig2_relevant_per_query.png")
     fig2.savefig(out2, dpi=DPI)
     plt.close(fig2)
-    print(f"  ✓ Saved: {out2}")
+    print(f"  [OK] Saved: {out2}")
 
     # ================================================================== #
     # Worked example
