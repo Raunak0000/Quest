@@ -1,0 +1,17 @@
+{
+  "domain": "lifestyle",
+  "split": "dev",
+  "query_type": "search",
+  "k": 100,
+  "rrf_k": 60,
+  "model_name": "all-MiniLM-L6-v2",
+  "seed": 42,
+  "dense_available": false,
+  "rankers_evaluated": [
+    "TF-IDF",
+    "BM25"
+  ],
+  "token_cache_path": "/home/raunak/Projects/Quest/indexes/corpus_tokens.pkl",
+  "embeddings_path": null,
+  "timestamp": "2026-11-02T11:49:09"
+}
