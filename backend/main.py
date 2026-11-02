@@ -486,3 +486,92 @@ def queries_sample() -> SampleQueriesResponse:
     return SampleQueriesResponse(
         queries=[SampleQuery(**q) for q in _state.sample_queries],
     )
+
+
+# ---------------------------------------------------------------------------
+# POST /rag — RAG streaming endpoint (Server-Sent Events)
+# ---------------------------------------------------------------------------
+
+from fastapi import Request
+from fastapi.responses import StreamingResponse
+
+
+class RagRequest(BaseModel):
+    """Request body for POST /rag."""
+
+    question: str = Field(..., min_length=1, description="The user's question.")
+    k: int = Field(5, ge=1, le=20, description="Number of passages to retrieve (1-20).")
+
+
+@app.post(
+    "/rag",
+    summary="RAG answer with citations — streams Server-Sent Events.",
+    tags=["RAG"],
+    response_class=StreamingResponse,
+)
+async def rag(body: RagRequest) -> StreamingResponse:
+    """Retrieve the top-*k* passages with the hybrid ranker, build a prompt,
+    then stream the LLM answer as Server-Sent Events in three phases:
+
+    1. **passages** event — JSON array ``[{rank, pid, score, text}, ...]`` so
+       the client can display citations immediately.
+    2. **token** events — one per LLM output token, value is the token text.
+    3. **done** event — signals end of stream (value ``"[DONE]"``).
+
+    On any error (missing key, unsupported provider, API failure) an **error**
+    SSE event is emitted and the stream ends; the server stays up.
+
+    Requires the hybrid ranker to be loaded (falls back to BM25 if not).
+    """
+    import json as _json
+    from backend.rag import build_prompt, generate
+
+    # Choose ranker: prefer hybrid, fall back to bm25, then tfidf
+    ranker = _state.hybrid or _state.bm25 or _state.tfidf
+    if ranker is None:
+        async def _no_ranker():
+            yield "event: error\ndata: No ranker is loaded — cannot retrieve passages.\n\n"
+        return StreamingResponse(_no_ranker(), media_type="text/event-stream")
+
+    async def _stream():
+        # --- Phase 1: retrieve passages ---
+        try:
+            raw = ranker.search(body.question, k=body.k)
+        except Exception as exc:
+            yield f"event: error\ndata: Retrieval failed: {exc}\n\n"
+            return
+
+        passages: list[tuple[int, str]] = []
+        hits_payload: list[dict] = []
+        for rank, (pid, score) in enumerate(raw, start=1):
+            text = (_state.passages or {}).get(pid, "")
+            passages.append((pid, text))
+            hits_payload.append({"rank": rank, "pid": pid, "score": score, "text": text})
+
+        yield f"event: passages\ndata: {_json.dumps(hits_payload)}\n\n"
+
+        # --- Phase 2: stream LLM tokens ---
+        prompt = build_prompt(body.question, passages)
+        try:
+            async for token in generate(prompt):
+                # Escape newlines so each SSE data line is single-line
+                safe = token.replace("\n", "\\n")
+                yield f"event: token\ndata: {safe}\n\n"
+        except (EnvironmentError, ValueError) as exc:
+            yield f"event: error\ndata: {exc}\n\n"
+            return
+        except Exception as exc:
+            yield f"event: error\ndata: LLM error: {exc}\n\n"
+            return
+
+        # --- Phase 3: done ---
+        yield "event: done\ndata: [DONE]\n\n"
+
+    return StreamingResponse(
+        _stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
