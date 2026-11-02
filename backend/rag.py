@@ -140,7 +140,12 @@ def _require_key(provider: str, api_key: str) -> str:
 
 async def _openai(prompt: str, api_key: str) -> AsyncIterator[str]:
     """Stream tokens from OpenAI chat completions (gpt-4o-mini)."""
-    from openai import AsyncOpenAI
+    try:
+        from openai import AsyncOpenAI  # type: ignore
+    except ImportError as exc:
+        raise ImportError(
+            "The 'openai' package is not installed. Install it with: pip install openai"
+        ) from exc
 
     client = AsyncOpenAI(api_key=_require_key("openai", api_key))
     stream = await client.chat.completions.create(
@@ -158,7 +163,12 @@ async def _openai(prompt: str, api_key: str) -> AsyncIterator[str]:
 
 async def _anthropic(prompt: str, api_key: str) -> AsyncIterator[str]:
     """Stream tokens from Anthropic Messages API (claude-3-haiku)."""
-    import anthropic
+    try:
+        import anthropic  # type: ignore
+    except ImportError as exc:
+        raise ImportError(
+            "The 'anthropic' package is not installed. Install it with: pip install anthropic"
+        ) from exc
 
     client = anthropic.AsyncAnthropic(api_key=_require_key("anthropic", api_key))
     async with client.messages.stream(
@@ -171,20 +181,50 @@ async def _anthropic(prompt: str, api_key: str) -> AsyncIterator[str]:
 
 
 async def _gemini(prompt: str, api_key: str) -> AsyncIterator[str]:
-    """Stream tokens from Google Gemini (gemini-1.5-flash)."""
-    import google.generativeai as genai
+    """Stream tokens from Google Gemini (defaults to gemini-3.5-flash, supports GEMINI_MODEL env)."""
+    try:
+        import google.generativeai as genai
+    except ImportError as exc:
+        raise ImportError(
+            "The 'google-generativeai' package is not installed. Install it with: pip install google-generativeai"
+        ) from exc
 
     genai.configure(api_key=_require_key("gemini", api_key))
-    model = genai.GenerativeModel("gemini-1.5-flash")
-    response = await model.generate_content_async(prompt, stream=True)
-    async for chunk in response:
-        if chunk.text:
-            yield chunk.text
+    preferred_model = os.environ.get("GEMINI_MODEL", "gemini-3.5-flash").strip() or "gemini-3.5-flash"
+    candidate_models = [preferred_model]
+    for m in ["gemini-3.5-flash", "gemini-3.8-flash", "gemini-3.1-flash-lite", "gemini-2.5-flash-lite"]:
+        if m not in candidate_models:
+            candidate_models.append(m)
+
+    last_exc = None
+    for model_name in candidate_models:
+        try:
+            model = genai.GenerativeModel(model_name)
+            response = await model.generate_content_async(prompt, stream=True)
+            async for chunk in response:
+                try:
+                    text = chunk.text
+                except Exception:
+                    text = ""
+                if text:
+                    yield text
+            return
+        except Exception as exc:
+            last_exc = exc
+            continue
+
+    if last_exc:
+        raise last_exc
 
 
 async def _groq(prompt: str, api_key: str) -> AsyncIterator[str]:
     """Stream tokens from Groq (llama-3.1-8b-instant via OpenAI-compatible API)."""
-    from groq import AsyncGroq
+    try:
+        from groq import AsyncGroq  # type: ignore
+    except ImportError as exc:
+        raise ImportError(
+            "The 'groq' package is not installed. Install it with: pip install groq"
+        ) from exc
 
     client = AsyncGroq(api_key=_require_key("groq", api_key))
     stream = await client.chat.completions.create(
