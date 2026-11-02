@@ -419,6 +419,20 @@ def main() -> None:
         print(f"     WARNING: Could not save PR plot: {exc}")
 
     # ------------------------------------------------------------------
+    # 9b. Save PR curve data as JSON (consumed by GET /pr-curves)
+    # ------------------------------------------------------------------
+    pr_curves_json: dict[str, dict[str, list[float]]] = {}
+    for ranker_name, (recalls, precisions) in pr_curves.items():
+        pr_curves_json[ranker_name] = {
+            "recall": recalls,
+            "precision": precisions,
+        }
+    pr_curves_json_path = os.path.join(args.output_dir, "pr_curves.json")
+    with open(pr_curves_json_path, "w", encoding="utf-8") as fh:
+        json.dump(pr_curves_json, fh, indent=2)
+    print(f"[9b/N] Saved PR curve data  → {pr_curves_json_path}")
+
+        # ------------------------------------------------------------------
     # 10. Save config.json
     # ------------------------------------------------------------------
     config = {

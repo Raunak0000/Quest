@@ -575,3 +575,97 @@ async def rag(body: RagRequest) -> StreamingResponse:
             "X-Accel-Buffering": "no",
         },
     )
+
+
+# ---------------------------------------------------------------------------
+# GET /metrics — serve results/results.json produced by scripts/run_eval.py
+# ---------------------------------------------------------------------------
+
+_RESULTS_DIR = os.path.join(_REPO_ROOT, "results")
+_RESULTS_JSON = os.path.join(_RESULTS_DIR, "results.json")
+_PR_CURVES_JSON = os.path.join(_RESULTS_DIR, "pr_curves.json")
+_RUN_EVAL_HINT = (
+    "Run  python scripts/run_eval.py  to generate evaluation results, "
+    "then restart the server."
+)
+
+
+@app.get(
+    "/metrics",
+    summary="Aggregate evaluation metrics for all rankers.",
+    tags=["Evaluation"],
+)
+def metrics() -> dict:
+    """Return the contents of ``results/results.json`` produced by
+    ``scripts/run_eval.py``.
+
+    The response is a JSON object keyed by ranker name, each value being a
+    dict of metric names to float values, e.g.:
+
+    ```json
+    {
+      "TF-IDF": {"P@10": 0.083, "R@100": 0.518, "MAP": 0.184, ...},
+      "BM25":   {"P@10": 0.105, "R@100": 0.632, "MAP": 0.253, ...}
+    }
+    ```
+
+    **404** is returned with a helpful hint if the file does not exist.
+    """
+    import json as _json
+
+    if not os.path.exists(_RESULTS_JSON):
+        raise HTTPException(
+            status_code=404,
+            detail=f"results/results.json not found. {_RUN_EVAL_HINT}",
+        )
+    try:
+        with open(_RESULTS_JSON, encoding="utf-8") as fh:
+            data = _json.load(fh)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to read results.json: {exc}",
+        ) from exc
+    return data
+
+
+@app.get(
+    "/pr-curves",
+    summary="Precision-Recall curve points for all evaluated rankers.",
+    tags=["Evaluation"],
+)
+def pr_curves() -> dict:
+    """Return interpolated PR curve data from ``results/pr_curves.json``
+    produced by ``scripts/run_eval.py``.
+
+    The response is keyed by ranker name; each value has:
+    - **recall** — list of 11 standard recall levels ``[0.0, 0.1, …, 1.0]``
+    - **precision** — corresponding mean interpolated precision values
+
+    ```json
+    {
+      "TF-IDF": {"recall": [0.0, 0.1, ...], "precision": [0.45, 0.38, ...]},
+      "BM25":   {"recall": [0.0, 0.1, ...], "precision": [0.57, 0.49, ...]}
+    }
+    ```
+
+    **404** is returned with a hint to run ``scripts/run_eval.py`` if the
+    file does not exist (it is written by the evaluation script alongside
+    ``results.json``).
+    """
+    import json as _json
+
+    if not os.path.exists(_PR_CURVES_JSON):
+        raise HTTPException(
+            status_code=404,
+            detail=f"results/pr_curves.json not found. {_RUN_EVAL_HINT}",
+        )
+    try:
+        with open(_PR_CURVES_JSON, encoding="utf-8") as fh:
+            data = _json.load(fh)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to read pr_curves.json: {exc}",
+        ) from exc
+    return data
